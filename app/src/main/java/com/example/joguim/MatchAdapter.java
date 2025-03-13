@@ -81,22 +81,39 @@ public class MatchAdapter extends RecyclerView.Adapter<MatchAdapter.MatchViewHol
         holder.textViewStatus.setBackgroundColor(statusColor);
 
         // Configurar número de confirmações
-        int confirmedCount = databaseHelper.getConfirmedPlayersCount(match.getId());
-        holder.textViewConfirmedCount.setText(confirmedCount + " jogador(es) confirmado(s)");
+        updateConfirmedCount(holder, match.getId());
 
         // Configurar botão de presença
         if (match.getStatus() == Match.MatchStatus.CANCELLED) {
             holder.buttonConfirmPresence.setVisibility(View.GONE);
         } else {
             holder.buttonConfirmPresence.setVisibility(View.VISIBLE);
-            boolean isConfirmed = databaseHelper.isPlayerConfirmed(match.getId(), userId);
-            updatePresenceButton(holder.buttonConfirmPresence, isConfirmed);
+            updatePresenceButtonState(holder.buttonConfirmPresence, match.getId());
 
             holder.buttonConfirmPresence.setOnClickListener(v -> {
-                boolean newConfirmation = !isConfirmed;
-                databaseHelper.confirmPresence(match.getId(), userId, newConfirmation);
-                updatePresenceButton(holder.buttonConfirmPresence, newConfirmation);
-                notifyItemChanged(position);
+                boolean currentConfirmation = databaseHelper.isPlayerConfirmed(match.getId(), userId);
+                boolean newConfirmation = !currentConfirmation;
+                
+                boolean success = databaseHelper.confirmPresence(match.getId(), userId, newConfirmation);
+                
+                if (success) {
+                    // Atualizar o botão
+                    updatePresenceButtonState(holder.buttonConfirmPresence, match.getId());
+                    // Atualizar o contador de confirmações
+                    updateConfirmedCount(holder, match.getId());
+                    
+                    // Mostrar feedback
+                    String message = newConfirmation ? "Presença confirmada!" : "Presença removida!";
+                    android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show();
+                } else {
+                    // Se falhou, mostrar mensagem de erro
+                    new AlertDialog.Builder(context)
+                        .setTitle("Erro")
+                        .setMessage("Não foi possível " + (newConfirmation ? "confirmar" : "remover") + 
+                            " sua presença. Tente novamente.")
+                        .setPositiveButton("OK", null)
+                        .show();
+                }
             });
         }
 
@@ -120,6 +137,22 @@ public class MatchAdapter extends RecyclerView.Adapter<MatchAdapter.MatchViewHol
         holder.itemView.setOnClickListener(v -> {
             showOptionsDialog(match);
         });
+    }
+
+    private void updateConfirmedCount(MatchViewHolder holder, long matchId) {
+        int confirmedCount = databaseHelper.getConfirmedPlayersCount(matchId);
+        holder.textViewConfirmedCount.setText(confirmedCount + " jogador(es) confirmado(s)");
+    }
+
+    private void updatePresenceButtonState(Button button, long matchId) {
+        boolean isConfirmed = databaseHelper.isPlayerConfirmed(matchId, userId);
+        if (isConfirmed) {
+            button.setText("Remover Presença");
+            button.setBackgroundColor(button.getContext().getColor(R.color.status_cancelled));
+        } else {
+            button.setText("Confirmar Presença");
+            button.setBackgroundColor(button.getContext().getColor(R.color.status_confirmed));
+        }
     }
 
     private void showOptionsDialog(Match match) {
@@ -150,16 +183,6 @@ public class MatchAdapter extends RecyclerView.Adapter<MatchAdapter.MatchViewHol
             })
             .setNegativeButton("Não", null)
             .show();
-    }
-
-    private void updatePresenceButton(Button button, boolean isConfirmed) {
-        if (isConfirmed) {
-            button.setText("Remover Presença");
-            button.setBackgroundColor(button.getContext().getColor(R.color.status_cancelled));
-        } else {
-            button.setText("Confirmar Presença");
-            button.setBackgroundColor(button.getContext().getColor(R.color.status_confirmed));
-        }
     }
 
     @Override

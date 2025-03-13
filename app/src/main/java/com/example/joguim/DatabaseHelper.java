@@ -494,140 +494,157 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         }
     }
 
-    // Métodos para confirmação de presença
-    public void confirmPresence(long matchId, long playerId, boolean confirmed) {
+    // Métodos para gerenciar presença
+    public boolean confirmPresence(long matchId, long playerId, boolean confirmed) {
         SQLiteDatabase db = this.getWritableDatabase();
-        db.beginTransaction();
+        boolean success = false;
+        
         try {
-            Log.d(TAG, "Confirmando presença - Match: " + matchId + ", Player: " + playerId + 
+            Log.d(TAG, "Alterando presença - Match: " + matchId + ", Player: " + playerId + 
                 ", Confirmado: " + confirmed);
             
-            // Verificar se o jogador existe
-            String playerQuery = "SELECT * FROM " + TABLE_PLAYERS + " WHERE " + COLUMN_ID + " = ?";
-            Cursor playerCursor = db.rawQuery(playerQuery, new String[]{String.valueOf(playerId)});
-            if (!playerCursor.moveToFirst()) {
-                Log.e(TAG, "Jogador não encontrado: " + playerId);
-                playerCursor.close();
-                return;
-            }
-            String playerName = playerCursor.getString(playerCursor.getColumnIndex(COLUMN_NAME));
-            playerCursor.close();
-            
-            // Verificar se a partida existe
-            String matchQuery = "SELECT * FROM " + TABLE_MATCHES + " WHERE " + COLUMN_ID + " = ?";
-            Cursor matchCursor = db.rawQuery(matchQuery, new String[]{String.valueOf(matchId)});
-            if (!matchCursor.moveToFirst()) {
-                Log.e(TAG, "Partida não encontrada: " + matchId);
-                matchCursor.close();
-                return;
-            }
-            String matchLocation = matchCursor.getString(matchCursor.getColumnIndex(COLUMN_LOCATION));
-            matchCursor.close();
-            
-            ContentValues values = new ContentValues();
-            values.put(COLUMN_MATCH_ID, matchId);
-            values.put(COLUMN_PLAYER_ID, playerId);
-            values.put(COLUMN_CONFIRMED, confirmed ? 1 : 0);
-
-            // Primeiro tenta atualizar
-            int updated = db.update(TABLE_MATCH_PLAYERS, values,
-                COLUMN_MATCH_ID + "=? AND " + COLUMN_PLAYER_ID + "=?",
-                new String[]{String.valueOf(matchId), String.valueOf(playerId)});
-            
-            // Se não atualizou nenhum registro, tenta inserir
-            if (updated == 0) {
-                long id = db.insert(TABLE_MATCH_PLAYERS, null, values);
-                Log.d(TAG, "Novo registro de presença criado - ID: " + id + 
-                    ", Jogador: " + playerName + 
-                    ", Partida: " + matchLocation);
-            } else {
-                Log.d(TAG, "Registro de presença atualizado - Jogador: " + playerName + 
-                    ", Partida: " + matchLocation);
-            }
-            
-            // Verificar se o registro foi realmente salvo
-            String checkQuery = "SELECT " + COLUMN_CONFIRMED + " FROM " + TABLE_MATCH_PLAYERS + 
-                " WHERE " + COLUMN_MATCH_ID + " = ? AND " + COLUMN_PLAYER_ID + " = ?";
-            Cursor checkCursor = db.rawQuery(checkQuery, 
-                new String[]{String.valueOf(matchId), String.valueOf(playerId)});
-            
-            if (checkCursor.moveToFirst()) {
-                int savedConfirmation = checkCursor.getInt(checkCursor.getColumnIndex(COLUMN_CONFIRMED));
-                if (savedConfirmation != (confirmed ? 1 : 0)) {
-                    Log.e(TAG, "Erro: Confirmação salva (" + savedConfirmation + 
-                        ") diferente da solicitada (" + (confirmed ? 1 : 0) + ")");
-                } else {
-                    Log.d(TAG, "Confirmação verificada e correta");
-                }
-            } else {
-                Log.e(TAG, "Erro: Registro de confirmação não encontrado após salvar");
-            }
-            checkCursor.close();
-            
-            db.setTransactionSuccessful();
-        } catch (Exception e) {
-            Log.e(TAG, "Erro ao confirmar presença: " + e.getMessage());
-            e.printStackTrace();
-        } finally {
-            try {
-                db.endTransaction();
-            } catch (Exception e) {
-                Log.e(TAG, "Erro ao finalizar transação: " + e.getMessage());
-                e.printStackTrace();
-            }
-        }
-    }
-
-    public boolean isPlayerConfirmed(long matchId, long playerId) {
-        SQLiteDatabase db = this.getReadableDatabase();
-        try {
-            Log.d(TAG, "Verificando confirmação - Match: " + matchId + ", Player: " + playerId);
-            
-            String query = "SELECT " + COLUMN_CONFIRMED + " FROM " + TABLE_MATCH_PLAYERS +
+            // Verificar se já existe um registro
+            String query = "SELECT " + COLUMN_ID + ", " + COLUMN_CONFIRMED + 
+                " FROM " + TABLE_MATCH_PLAYERS + 
                 " WHERE " + COLUMN_MATCH_ID + " = ? AND " + COLUMN_PLAYER_ID + " = ?";
             
             Cursor cursor = db.rawQuery(query, 
                 new String[]{String.valueOf(matchId), String.valueOf(playerId)});
+            
+            db.beginTransaction();
+            try {
+                ContentValues values = new ContentValues();
+                values.put(COLUMN_MATCH_ID, matchId);
+                values.put(COLUMN_PLAYER_ID, playerId);
+                values.put(COLUMN_CONFIRMED, confirmed ? 1 : 0);
+                
+                if (cursor.moveToFirst()) {
+                    // Registro existe, atualizar
+                    long id = cursor.getLong(cursor.getColumnIndex(COLUMN_ID));
+                    int currentStatus = cursor.getInt(cursor.getColumnIndex(COLUMN_CONFIRMED));
+                    
+                    Log.d(TAG, "Registro encontrado - ID: " + id + 
+                        ", Status atual: " + currentStatus + 
+                        ", Novo status: " + (confirmed ? 1 : 0));
+                    
+                    success = db.update(TABLE_MATCH_PLAYERS, values,
+                        COLUMN_ID + " = ?",
+                        new String[]{String.valueOf(id)}) > 0;
+                    
+                    Log.d(TAG, "Atualização " + (success ? "bem-sucedida" : "falhou"));
+                } else {
+                    // Registro não existe, inserir
+                    Log.d(TAG, "Criando novo registro de presença");
+                    long id = db.insert(TABLE_MATCH_PLAYERS, null, values);
+                    success = id != -1;
+                    Log.d(TAG, "Inserção " + (success ? "bem-sucedida (ID: " + id + ")" : "falhou"));
+                }
+                
+                if (success) {
+                    db.setTransactionSuccessful();
+                    Log.d(TAG, "Transação concluída com sucesso");
+                }
+            } finally {
+                cursor.close();
+                db.endTransaction();
+            }
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Erro ao alterar presença: " + e.getMessage());
+            e.printStackTrace();
+        }
+        
+        return success;
+    }
 
-            boolean confirmed = false;
+    public boolean isPlayerConfirmed(long matchId, long playerId) {
+        SQLiteDatabase db = this.getReadableDatabase();
+        Cursor cursor = null;
+        boolean confirmed = false;
+        
+        try {
+            String query = "SELECT " + COLUMN_CONFIRMED + 
+                " FROM " + TABLE_MATCH_PLAYERS +
+                " WHERE " + COLUMN_MATCH_ID + " = ? AND " + COLUMN_PLAYER_ID + " = ?";
+            
+            cursor = db.rawQuery(query, new String[]{String.valueOf(matchId), String.valueOf(playerId)});
+            
             if (cursor.moveToFirst()) {
                 confirmed = cursor.getInt(cursor.getColumnIndex(COLUMN_CONFIRMED)) == 1;
-                Log.d(TAG, "Jogador está " + (confirmed ? "confirmado" : "não confirmado"));
+                Log.d(TAG, "Status de confirmação encontrado: " + confirmed);
             } else {
                 Log.d(TAG, "Nenhum registro de confirmação encontrado");
             }
-            cursor.close();
-            return confirmed;
         } catch (Exception e) {
             Log.e(TAG, "Erro ao verificar confirmação: " + e.getMessage());
             e.printStackTrace();
-            return false;
+        } finally {
+            if (cursor != null) {
+                cursor.close();
+            }
         }
+        
+        return confirmed;
     }
 
     public int getConfirmedPlayersCount(long matchId) {
         SQLiteDatabase db = this.getReadableDatabase();
+        Cursor cursor = null;
+        int count = 0;
+        
         try {
-            Log.d(TAG, "Contando jogadores confirmados para partida " + matchId);
-            
             String query = "SELECT COUNT(*) FROM " + TABLE_MATCH_PLAYERS +
                 " WHERE " + COLUMN_MATCH_ID + " = ? AND " + COLUMN_CONFIRMED + " = 1";
             
-            Cursor cursor = db.rawQuery(query, new String[]{String.valueOf(matchId)});
-
-            int count = 0;
+            cursor = db.rawQuery(query, new String[]{String.valueOf(matchId)});
+            
             if (cursor.moveToFirst()) {
                 count = cursor.getInt(0);
             }
-            cursor.close();
-            
-            Log.d(TAG, "Total de jogadores confirmados: " + count);
-            return count;
         } catch (Exception e) {
             Log.e(TAG, "Erro ao contar jogadores confirmados: " + e.getMessage());
             e.printStackTrace();
-            return 0;
+        } finally {
+            if (cursor != null) {
+                cursor.close();
+            }
         }
+        
+        return count;
+    }
+
+    public List<Player> getConfirmedPlayersForMatch(long matchId) {
+        List<Player> players = new ArrayList<>();
+        SQLiteDatabase db = this.getReadableDatabase();
+        Cursor cursor = null;
+        
+        try {
+            String query = "SELECT p.* FROM " + TABLE_PLAYERS + " p " +
+                "INNER JOIN " + TABLE_MATCH_PLAYERS + " mp ON p." + COLUMN_ID + " = mp." + COLUMN_PLAYER_ID + " " +
+                "WHERE mp." + COLUMN_MATCH_ID + " = ? AND mp." + COLUMN_CONFIRMED + " = 1 " +
+                "ORDER BY p." + COLUMN_NAME;
+            
+            cursor = db.rawQuery(query, new String[]{String.valueOf(matchId)});
+            
+            while (cursor.moveToNext()) {
+                Player player = new Player(
+                    cursor.getString(cursor.getColumnIndex(COLUMN_NAME)),
+                    Player.Position.valueOf(cursor.getString(cursor.getColumnIndex(COLUMN_POSITION))),
+                    cursor.getInt(cursor.getColumnIndex(COLUMN_LEVEL))
+                );
+                player.setId(cursor.getLong(cursor.getColumnIndex(COLUMN_ID)));
+                players.add(player);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Erro ao buscar jogadores confirmados: " + e.getMessage());
+            e.printStackTrace();
+        } finally {
+            if (cursor != null) {
+                cursor.close();
+            }
+        }
+        
+        return players;
     }
 
     // Métodos para Times
@@ -764,111 +781,6 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         return teams;
     }
 
-    public List<Player> getConfirmedPlayersForMatch(long matchId) {
-        List<Player> players = new ArrayList<>();
-        SQLiteDatabase db = this.getReadableDatabase();
-        Cursor cursor = null;
-        
-        try {
-            Log.d(TAG, "Iniciando busca de jogadores confirmados para partida " + matchId);
-            
-            // Primeiro verificar se a partida existe
-            String matchQuery = "SELECT * FROM " + TABLE_MATCHES + " WHERE " + COLUMN_ID + " = ?";
-            Cursor matchCursor = db.rawQuery(matchQuery, new String[]{String.valueOf(matchId)});
-            if (!matchCursor.moveToFirst()) {
-                Log.e(TAG, "Partida não encontrada: " + matchId);
-                matchCursor.close();
-                return players;
-            }
-            matchCursor.close();
-            
-            // Verificar confirmações na tabela match_players
-            String countQuery = "SELECT " + COLUMN_PLAYER_ID + ", " + COLUMN_CONFIRMED + 
-                " FROM " + TABLE_MATCH_PLAYERS + 
-                " WHERE " + COLUMN_MATCH_ID + " = ?";
-            
-            Cursor confirmationsCursor = db.rawQuery(countQuery, new String[]{String.valueOf(matchId)});
-            Log.d(TAG, "Total de registros em match_players: " + confirmationsCursor.getCount());
-            
-            while (confirmationsCursor.moveToNext()) {
-                long playerId = confirmationsCursor.getLong(confirmationsCursor.getColumnIndex(COLUMN_PLAYER_ID));
-                int confirmed = confirmationsCursor.getInt(confirmationsCursor.getColumnIndex(COLUMN_CONFIRMED));
-                Log.d(TAG, "Registro encontrado - Player: " + playerId + ", Confirmado: " + confirmed);
-            }
-            confirmationsCursor.close();
-            
-            // Buscar jogadores confirmados com INNER JOIN
-            String query = "SELECT DISTINCT p.* FROM " + TABLE_PLAYERS + " p " +
-                         "INNER JOIN " + TABLE_MATCH_PLAYERS + " mp ON p." + COLUMN_ID + " = mp." + COLUMN_PLAYER_ID + " " +
-                         "WHERE mp." + COLUMN_MATCH_ID + " = ? AND mp." + COLUMN_CONFIRMED + " = 1 " +
-                         "ORDER BY p." + COLUMN_NAME + " ASC";
-                         
-            Log.d(TAG, "Executando query SQL: " + query);
-            cursor = db.rawQuery(query, new String[]{String.valueOf(matchId)});
-            
-            Log.d(TAG, "Número de jogadores encontrados: " + cursor.getCount());
-            
-            while (cursor != null && cursor.moveToNext()) {
-                try {
-                    String name = cursor.getString(cursor.getColumnIndex(COLUMN_NAME));
-                    String positionStr = cursor.getString(cursor.getColumnIndex(COLUMN_POSITION));
-                    int level = cursor.getInt(cursor.getColumnIndex(COLUMN_LEVEL));
-                    long playerId = cursor.getLong(cursor.getColumnIndex(COLUMN_ID));
-                    
-                    Player player = new Player(name, Player.Position.valueOf(positionStr), level);
-                    player.setId(playerId);
-                    players.add(player);
-                    
-                    Log.d(TAG, "Jogador carregado - ID: " + playerId + 
-                        ", Nome: " + name + 
-                        ", Posição: " + positionStr + 
-                        ", Nível: " + level);
-                } catch (Exception e) {
-                    Log.e(TAG, "Erro ao carregar jogador do cursor: " + e.getMessage());
-                    e.printStackTrace();
-                }
-            }
-            
-            // Verificar se há inconsistências
-            if (players.isEmpty()) {
-                Log.e(TAG, "Nenhum jogador confirmado encontrado para a partida " + matchId);
-                
-                // Verificar se há registros órfãos
-                String orphanQuery = "SELECT mp." + COLUMN_PLAYER_ID + " FROM " + TABLE_MATCH_PLAYERS + " mp " +
-                    "LEFT JOIN " + TABLE_PLAYERS + " p ON mp." + COLUMN_PLAYER_ID + " = p." + COLUMN_ID + " " +
-                    "WHERE mp." + COLUMN_MATCH_ID + " = ? AND mp." + COLUMN_CONFIRMED + " = 1 " +
-                    "AND p." + COLUMN_ID + " IS NULL";
-                
-                Cursor orphanCursor = db.rawQuery(orphanQuery, new String[]{String.valueOf(matchId)});
-                if (orphanCursor.moveToFirst()) {
-                    Log.e(TAG, "Encontrados registros órfãos de confirmação!");
-                    do {
-                        long orphanPlayerId = orphanCursor.getLong(0);
-                        Log.e(TAG, "Registro órfão encontrado - Player ID: " + orphanPlayerId);
-                        
-                        // Remover registro órfão
-                        db.delete(TABLE_MATCH_PLAYERS, 
-                            COLUMN_MATCH_ID + " = ? AND " + COLUMN_PLAYER_ID + " = ?",
-                            new String[]{String.valueOf(matchId), String.valueOf(orphanPlayerId)});
-                    } while (orphanCursor.moveToNext());
-                }
-                orphanCursor.close();
-            }
-            
-            Log.d(TAG, "Total de jogadores confirmados carregados: " + players.size());
-            return players;
-            
-        } catch (Exception e) {
-            Log.e(TAG, "Erro ao buscar jogadores confirmados: " + e.getMessage());
-            e.printStackTrace();
-            return new ArrayList<>();
-        } finally {
-            if (cursor != null && !cursor.isClosed()) {
-                cursor.close();
-            }
-        }
-    }
-
     public void deleteMatch(long matchId) {
         SQLiteDatabase db = this.getWritableDatabase();
         try {
@@ -887,5 +799,40 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             Log.e(TAG, "Erro ao deletar partida: " + e.getMessage());
             e.printStackTrace();
         }
+    }
+
+    public boolean deleteTeam(long teamId) {
+        SQLiteDatabase db = this.getWritableDatabase();
+        boolean success = false;
+        
+        try {
+            db.beginTransaction();
+            
+            // Primeiro, deletar os jogadores do time
+            int playersDeleted = db.delete(TABLE_TEAM_PLAYERS, 
+                "team_id=?", 
+                new String[]{String.valueOf(teamId)});
+            Log.d(TAG, "Jogadores removidos do time: " + playersDeleted);
+            
+            // Depois, deletar o time
+            int teamDeleted = db.delete(TABLE_TEAMS, 
+                COLUMN_ID + "=?", 
+                new String[]{String.valueOf(teamId)});
+            Log.d(TAG, "Time excluído: " + teamDeleted);
+            
+            success = teamDeleted > 0;
+            if (success) {
+                db.setTransactionSuccessful();
+                Log.d(TAG, "Time e jogadores relacionados excluídos com sucesso");
+            }
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Erro ao excluir time: " + e.getMessage());
+            e.printStackTrace();
+        } finally {
+            db.endTransaction();
+        }
+        
+        return success;
     }
 } 

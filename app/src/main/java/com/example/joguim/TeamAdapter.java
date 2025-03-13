@@ -13,9 +13,18 @@ import java.util.List;
 public class TeamAdapter extends RecyclerView.Adapter<TeamAdapter.TeamViewHolder> {
     private List<Team> teams = new ArrayList<>();
     private Context context;
+    private OnTeamLongClickListener onTeamLongClickListener;
+
+    public interface OnTeamLongClickListener {
+        void onTeamLongClick(Team team, int position);
+    }
 
     public TeamAdapter(Context context) {
         this.context = context;
+    }
+
+    public void setOnTeamLongClickListener(OnTeamLongClickListener listener) {
+        this.onTeamLongClickListener = listener;
     }
 
     @NonNull
@@ -41,6 +50,15 @@ public class TeamAdapter extends RecyclerView.Adapter<TeamAdapter.TeamViewHolder
                   .append(" (").append(player.getPosition().getDisplayName()).append(")");
         }
         holder.textViewPlayers.setText(players.toString());
+
+        // Configurar clique longo
+        holder.itemView.setOnLongClickListener(v -> {
+            if (onTeamLongClickListener != null) {
+                onTeamLongClickListener.onTeamLongClick(team, position);
+                return true;
+            }
+            return false;
+        });
     }
 
     @Override
@@ -56,6 +74,14 @@ public class TeamAdapter extends RecyclerView.Adapter<TeamAdapter.TeamViewHolder
     public void addTeam(Team team) {
         teams.add(team);
         notifyItemInserted(teams.size() - 1);
+    }
+
+    public void removeTeam(int position) {
+        if (position >= 0 && position < teams.size()) {
+            teams.remove(position);
+            notifyItemRemoved(position);
+            notifyItemRangeChanged(position, teams.size());
+        }
     }
 
     public void clearTeams() {

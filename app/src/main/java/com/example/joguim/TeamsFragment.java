@@ -70,6 +70,26 @@ public class TeamsFragment extends Fragment {
             buttonGenerateTeams.setOnClickListener(v -> showTeamGenerationDialog());
 
             loadAllTeams();
+
+            // Configurar o listener de clique longo para exclusão
+            teamAdapter.setOnTeamLongClickListener((team, position) -> {
+                AlertDialog.Builder builder = new AlertDialog.Builder(requireContext());
+                builder.setTitle("Excluir Time")
+                       .setMessage("Deseja excluir este time?")
+                       .setPositiveButton("Sim", (dialog, which) -> {
+                           DatabaseHelper db = new DatabaseHelper(requireContext());
+                           if (db.deleteTeam(team.getId())) {
+                               teamAdapter.removeTeam(position);
+                               Toast.makeText(requireContext(), 
+                                   "Time excluído com sucesso", Toast.LENGTH_SHORT).show();
+                           } else {
+                               Toast.makeText(requireContext(), 
+                                   "Erro ao excluir o time", Toast.LENGTH_SHORT).show();
+                           }
+                       })
+                       .setNegativeButton("Não", null)
+                       .show();
+            });
         } catch (Exception e) {
             Log.e(TAG, "Erro ao criar view: " + e.getMessage());
             e.printStackTrace();
